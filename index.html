@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<title>Kaffekode</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f3f7;color:#111;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif}
+main{max-width:620px;margin:auto;padding:18px 15px 45px}h1{font-size:30px;margin:4px 0}.intro{color:#666;margin:0 0 18px}
+.card{background:#fff;border-radius:20px;padding:18px;margin:14px 0;box-shadow:0 2px 12px #0001}h2{font-size:20px;margin:0 0 12px}
+#maker{width:min(82vw,360px);display:block;margin:12px auto;touch-action:manipulation;background:#fff;border-radius:16px}
+.row{display:flex;gap:8px;margin-top:10px}.row>*{flex:1}button{border:0;border-radius:13px;padding:13px 10px;font:inherit;background:#111;color:#fff}.light{background:#e7e7ec;color:#111}
+input,textarea{width:100%;padding:12px;border:1px solid #ccc;border-radius:11px;font:inherit}textarea{min-height:100px;resize:vertical}
+label{display:block;color:#666;font-size:14px;margin:13px 0 5px}.small{font-size:13px;color:#666;line-height:1.45}
+#status{margin-top:12px;padding:11px;border-radius:11px;background:#f0f0f2}.item{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #ddd}.item img{width:64px;height:64px;border-radius:9px}.grow{flex:1}
+.detail{padding:14px;background:#f6f6f8;border-radius:13px;margin-top:10px}.detail a{color:#06c;word-break:break-all}
+.preview{font-weight:600;margin:10px 0 0}.ok{background:#e9f7ec}.warn{background:#fff5df}
+</style>
+</head>
+<body>
+<main>
+<h1>Kaffekode</h1>
+<p class="intro">En simpel kode til single-dose kaffetuber. Koden på tuben peger på dine egne kaffeoplysninger.</p>
+
+<div class="card">
+<h2>1. Lav din kode</h2>
+<canvas id="maker" width="900" height="900"></canvas>
+<p class="small"><b>På tuben tegner du kun de sorte prikker.</b> Midterprikken og den lille topmarkør er faste. De grå ringe er kun hjælpelinjer og skal ikke tegnes.</p>
+<div class="row"><button id="random">Tilfældig</button><button id="clear" class="light">Ryd</button></div>
+
+<label>Kaffens navn</label><input id="name" placeholder="fx Ethiopia Guji">
+<label>Beskrivelse</label>
+<textarea id="description" placeholder="Fx 20 g · lysristet · noter om smag, bryggeopskrift, producent osv."></textarea>
+<label>Link til beskrivelse / rister / opskrift (valgfrit)</label>
+<input id="link" type="url" placeholder="https://...">
+<div class="row"><button id="save">Gem kode</button><button id="download" class="light">Gem symbol</button></div>
+<div id="status">Tegn symbolet på tuben efter billedet.</div>
+</div>
+
+<div class="card">
+<h2>2. Scan en tube</h2>
+<input id="photo" type="file" accept="image/*" capture="environment">
+<p class="small">Tag et tæt billede af hele koden. Du behøver ikke tegne ringene. Hold gerne kameraet lige over koden og sørg for god kontrast.</p>
+<div id="scanResult"></div>
+</div>
+
+<div class="card">
+<h2>3. Mine kaffekoder</h2>
+<div id="saved"></div>
+</div>
+</main>
+<script>
+const canvas=document.querySelector('#maker'),ctx=canvas.getContext('2d'),state=Array(8).fill(false);
+const pos=Array.from({length:8},(_,i)=>{const a=i*Math.PI/4-Math.PI/2;return [Math.cos(a),Math.sin(a)]});
+function draw(){
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,900,900);
+ const cx=450,cy=450,R=235;
+ // subtle guide only — not intended to be drawn on the tube
+ ctx.strokeStyle='#d9d9de';ctx.lineWidth=4;ctx.setLineDash([12,14]);ctx.beginPath();ctx.arc(cx,cy,310,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
+ ctx.fillStyle='#111';ctx.beginPath();ctx.arc(cx,cy,72,0,Math.PI*2);ctx.fill();
+ for(let i=0;i<8;i++){
+   const x=cx+pos[i][0]*R,y=cy+pos[i][1]*R;
+   ctx.beginPath();ctx.arc(x,y,42,0,Math.PI*2);
+   ctx.fillStyle=state[i]?'#111':'#fff';ctx.fill();
+   ctx.strokeStyle=state[i]?'#111':'#b8b8bf';ctx.lineWidth=4;ctx.stroke();
+ }
+ ctx.fillStyle='#111';ctx.beginPath();ctx.roundRect(420,50,60,34,17);ctx.fill();
+}
+canvas.addEventListener('click',e=>{const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left)*900/r.width,y=(e.clientY-r.top)*900/r.height;let best=-1,dist=1e9;pos.forEach((v,i)=>{const d=Math.hypot(x-(450+v[0]*235),y-(450+v[1]*235));if(d<dist){dist=d;best=i}});if(dist<95){state[best]=!state[best];draw()}});
+function code(){return state.map(x=>x?'1':'0').join('')}
+function msg(t,cls=''){const s=document.querySelector('#status');s.textContent=t;s.className=cls}
+document.querySelector('#random').onclick=()=>{for(let i=0;i<8;i++)state[i]=Math.random()>.5;draw()};
+document.querySelector('#clear').onclick=()=>{state.fill(false);draw()};
+document.querySelector('#download').onclick=()=>{const a=document.createElement('a');a.href=canvas.toDataURL('image/png');a.download='kaffekode-symbol.png';a.click()};
+document.querySelector('#save').onclick=()=>{const name=document.querySelector('#name').value.trim();if(!name){msg('Skriv kaffens navn først.','warn');return}const a=JSON.parse(localStorage.getItem('kaffekoder')||'[]'),c=code();if(a.some(x=>x.code===c)){msg('Dette symbol er allerede brugt. Vælg et andet mønster.','warn');return}a.unshift({name,description:document.querySelector('#description').value.trim(),link:document.querySelector('#link').value.trim(),code:c,img:canvas.toDataURL('image/png')});localStorage.setItem('kaffekoder',JSON.stringify(a));show();msg('Gemt: '+name,'ok')};
+function show(){const a=JSON.parse(localStorage.getItem('kaffekoder')||'[]'),el=document.querySelector('#saved');el.innerHTML='';if(!a.length){el.innerHTML='<p class="small">Ingen gemte koder endnu.</p>';return}a.forEach(v=>{const d=document.createElement('div');d.className='item';const im=document.createElement('img');im.src=v.img;const g=document.createElement('div');g.className='grow';g.innerHTML='<b>'+safe(v.name)+'</b><br><span class="small">Kode '+v.code+'</span>';const b=document.createElement('button');b.className='light';b.textContent='Beskrivelse';b.onclick=()=>details(v);d.append(im,g,b);el.append(d)})}
+function details(v){const el=document.querySelector('#scanResult');el.innerHTML='<div class="detail"><h3 style="margin:0 0 8px">'+safe(v.name)+'</h3>'+(v.description?'<p style="white-space:pre-wrap">'+safe(v.description)+'</p>':'')+(v.link?'<p><a href="'+safeAttr(v.link)+'" target="_blank" rel="noopener">Åbn link</a></p>':'<p class="small">Intet link gemt.</p>')+'</div>';el.scrollIntoView({behavior:'smooth',block:'center'})}
+function safe(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function safeAttr(s){return safe(s).replace(/javascript:/gi,'')}
+
+document.querySelector('#photo').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const im=new Image();im.onload=()=>{scan(im);URL.revokeObjectURL(im.src)};im.onerror=()=>msg('Kunne ikke åbne billedet.','warn');im.src=URL.createObjectURL(f)});
+
+// More robust scanner for the new "filled dots only" design.
+// It uses connected dark components to find the center and top marker,
+// then samples all 8 expected positions with a local dark-pixel ratio.
+function scan(im){
+ const max=1400,sc=Math.min(1,max/Math.max(im.width,im.height)),w=Math.max(1,Math.round(im.width*sc)),h=Math.max(1,Math.round(im.height*sc));
+ const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(im,0,0,w,h);
+ const data=x.getImageData(0,0,w,h).data;
+ const gray=new Uint8Array(w*h);
+ for(let i=0,p=0;i<gray.length;i++,p+=4)gray[i]=Math.round((data[p]*.299+data[p+1]*.587+data[p+2]*.114));
+ // Adaptive-ish threshold from the darkest part of the image.
+ let hist=new Uint32Array(256);for(let i=0;i<gray.length;i+=2)hist[gray[i]]++;
+ let cum=0,total=0;for(let i=0;i<256;i++)total+=hist[i];
+ let t=95;for(let i=0;i<180;i++){cum+=hist[i];if(cum>total*.08){t=Math.max(55,Math.min(145,i+18));break}}
+ const dark=new Uint8Array(w*h);for(let i=0;i<gray.length;i++)dark[i]=gray[i]<t?1:0;
+ // Connected components, downsampled when images are large.
+ const step=Math.max(1,Math.floor(Math.max(w,h)/1000));
+ const sw=Math.ceil(w/step),sh=Math.ceil(h/step),sd=new Uint8Array(sw*sh);
+ for(let yy=0;yy<sh;yy++)for(let xx=0;xx<sw;xx++)sd[yy*sw+xx]=dark[Math.min(h-1,yy*step)*w+Math.min(w-1,xx*step)];
+ const seen=new Uint8Array(sw*sh),comps=[];
+ const qx=new Int32Array(sw*sh),qy=new Int32Array(sw*sh);
+ for(let sy=0;sy<sh;sy++)for(let sx=0;sx<sw;sx++){const si=sy*sw+sx;if(!sd[si]||seen[si])continue;let head=0,tail=0;qx[tail]=sx;qy[tail]=sy;tail++;seen[si]=1;let n=0,minx=sx,maxx=sx,miny=sy,maxy=sy,sumx=0,sumy=0;while(head<tail){const xx=qx[head],yy=qy[head];head++;n++;sumx+=xx;sumy+=yy;minx=Math.min(minx,xx);maxx=Math.max(maxx,xx);miny=Math.min(miny,yy);maxy=Math.max(maxy,yy);for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=xx+dx,ny=yy+dy;if(nx<0||ny<0||nx>=sw||ny>=sh)continue;const ni=ny*sw+nx;if(sd[ni]&&!seen[ni]){seen[ni]=1;qx[tail]=nx;qy[tail]=ny;tail++}}}if(n>=4)comps.push({n,minx,maxx,miny,maxy,cx:sumx/n,cy:sumy/n,ww:maxx-minx+1,hh:maxy-miny+1})}
+ const scaleBack=step;
+ const candidates=comps.map(o=>({...o,n:o.n*step*step,minx:o.minx*scaleBack,maxx:(o.maxx+1)*scaleBack,miny:o.miny*scaleBack,maxy:(o.maxy+1)*scaleBack,cx:o.cx*scaleBack,cy:o.cy*scaleBack,ww:o.ww*scaleBack,hh:o.hh*scaleBack})).filter(o=>o.n>=18&&o.ww>=4&&o.hh>=4);
+ if(!candidates.length){msg('Jeg kunne ikke finde tydelige sorte markeringer. Prøv et tættere billede med mere lys.','warn');return}
+ // Center is normally the largest roughly circular component.
+ const centerCandidates=candidates.filter(o=>{const ar=o.ww/o.hh;return ar>.45&&ar<2.2&&o.ww>Math.min(w,h)*.025});
+ let center=(centerCandidates.length?centerCandidates:candidates).sort((a,b)=>b.n-a.n)[0];
+ // Ignore a huge dark background/object by preferring a compact component if needed.
+ if(center.ww>Math.min(w,h)*.55||center.hh>Math.min(w,h)*.55){const compact=candidates.filter(o=>o.ww<Math.min(w,h)*.35&&o.hh<Math.min(w,h)*.35);if(compact.length)center=compact.sort((a,b)=>b.n-a.n)[0]}
+ const cx=center.cx,cy=center.cy;
+ // Find top marker: compact component above center. Its distance defines the code radius.
+ const markerCandidates=candidates.filter(o=>o!==center&&o.cy<cy-Math.min(w,h)*.12&&Math.abs(o.cx-cx)<Math.min(w,h)*.22);
+ let marker=markerCandidates.sort((a,b)=>{const da=Math.hypot(a.cx-cx,a.cy-cy),db=Math.hypot(b.cx-cx,b.cy-cy);return Math.abs(da-.95*Math.min(w,h)*.35)-Math.abs(db-.95*Math.min(w,h)*.35)})[0];
+ let radius;
+ if(marker){radius=Math.hypot(marker.cx-cx,marker.cy-cy)*.86}else{
+   // Fallback: infer radius from other compact components around the center.
+   const ds=candidates.filter(o=>o!==center).map(o=>Math.hypot(o.cx-cx,o.cy-cy)).filter(d=>d>Math.min(w,h)*.10&&d<Math.min(w,h)*.65).sort((a,b)=>a-b);
+   if(ds.length)radius=ds[Math.floor(ds.length/2)];
+ }
+ if(!radius||radius<Math.min(w,h)*.12){msg('Jeg fandt midten, men ikke sikkert nok hvor prikkerne skal ligge. Tag et tættere billede af hele koden.','warn');return}
+ // Determine orientation from marker. If marker missing, assume top orientation.
+ let rot=marker?Math.atan2(marker.cy-cy,marker.cx-cx)+Math.PI/2:0;
+ const offsets=pos.map(([px,py])=>{const a=Math.atan2(py,px)+rot;return [Math.cos(a),Math.sin(a)]});
+ function darkRatio(px,py,r){let sum=0,cnt=0;const x0=Math.max(0,Math.floor(px-r)),x1=Math.min(w-1,Math.ceil(px+r)),y0=Math.max(0,Math.floor(py-r)),y1=Math.min(h-1,Math.ceil(py+r));for(let yy=y0;yy<=y1;yy++)for(let xx=x0;xx<=x1;xx++){const dx=xx-px,dy=yy-py;if(dx*dx+dy*dy<=r*r){cnt++;if(gray[yy*w+xx]<t)sum++}}return cnt?sum/cnt:0}
+ // Use a radius that covers most of a hand-drawn dot but not the gap around it.
+ const sampleR=Math.max(5,Math.min(radius*.24,Math.min(w,h)*.08));
+ let out=[];
+ for(let i=0;i<8;i++){const px=cx+offsets[i][0]*radius,py=cy+offsets[i][1]*radius;const ratio=darkRatio(px,py,sampleR);out.push(ratio>.18?'1':'0')}
+ const cde=out.join(''),a=JSON.parse(localStorage.getItem('kaffekoder')||'[]'),found=a.find(v=>v.code===cde);
+ if(found){details(found);msg('Kode fundet: '+found.name,'ok')}
+ else{document.querySelector('#scanResult').innerHTML='<div class="detail"><b>Koden blev læst som:</b> '+cde+'<br><span class="small">Den findes ikke blandt dine gemte koder. Hvis du lige har gemt den, så brug samme browser/enhed.</span></div>';msg('Koden blev læst, men den findes ikke blandt dine gemte koder.','warn')}
+}
+draw();show();
+
+// --- Kaffekode sikkerhedskopi ---
+// Data i appen gemmes fortsat lokalt for hurtig brug. Eksport/import gør,
+// at brugeren kan sikkerhedskopiere data uden at være afhængig af Safari-data.
+(function () {
+  const EXPORT_VERSION = 1;
+
+  function getCoffeeData() {
+    // Find common localStorage keys used by Kaffekode.
+    const keys = Object.keys(localStorage);
+    const data = {};
+    keys.forEach(k => {
+      try {
+        data[k] = JSON.parse(localStorage.getItem(k));
+      } catch {
+        data[k] = localStorage.getItem(k);
+      }
+    });
+    return data;
+  }
+
+  function downloadBackup() {
+    const payload = {
+      app: "Kaffekode",
+      version: EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      data: getCoffeeData()
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json"
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "kaffekode-backup.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function importBackup(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(reader.result);
+        if (!payload || payload.app !== "Kaffekode" || !payload.data) {
+          throw new Error("Ugyldig Kaffekode-backup");
+        }
+
+        if (!confirm("Import vil erstatte de nuværende Kaffekode-data på denne enhed. Fortsæt?")) {
+          return;
+        }
+
+        Object.keys(localStorage).forEach(k => localStorage.removeItem(k));
+        Object.entries(payload.data).forEach(([k, v]) => {
+          localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v));
+        });
+
+        alert("Kaffedata er importeret. Appen genindlæses.");
+        location.reload();
+      } catch (e) {
+        alert("Kunne ikke importere filen. Kontrollér, at det er en Kaffekode-backup.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const exportBtn = document.getElementById("exportBtn");
+    const importBtn = document.getElementById("importBtn");
+    const importFile = document.getElementById("importFile");
+
+    if (exportBtn) exportBtn.addEventListener("click", downloadBackup);
+    if (importBtn) importBtn.addEventListener("click", () => importFile && importFile.click());
+    if (importFile) {
+      importFile.addEventListener("change", e => {
+        const file = e.target.files && e.target.files[0];
+        if (file) importBackup(file);
+        e.target.value = "";
+      });
+    }
+  });
+})();
+
+</script>
+</body></html>
