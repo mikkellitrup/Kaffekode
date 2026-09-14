@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<title>Kaffekode</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f3f3f7;color:#111;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif}
+main{max-width:640px;margin:auto;padding:18px 15px 50px}
+h1{font-size:30px;margin:4px 0}.intro{color:#666;margin:0 0 18px}
+.card{background:#fff;border-radius:20px;padding:18px;margin:14px 0;box-shadow:0 2px 12px #0001}
+h2{font-size:20px;margin:0 0 12px}
+#maker{width:min(86vw,380px);height:auto;display:block;margin:12px auto;background:#fff;border-radius:16px;touch-action:none}
+.row{display:flex;gap:8px;margin-top:10px}.row>*{flex:1}
+button{border:0;border-radius:13px;padding:13px 10px;font:inherit;background:#111;color:#fff;cursor:pointer}
+.light{background:#e7e7ec;color:#111}
+.danger{background:#b00020;color:#fff}
+input,textarea{width:100%;padding:12px;border:1px solid #ccc;border-radius:11px;font:inherit}
+textarea{min-height:100px;resize:vertical}
+label{display:block;color:#666;font-size:14px;margin:13px 0 5px}
+.small{font-size:13px;color:#666;line-height:1.45}
+#status,#scanResult{margin-top:12px;padding:11px;border-radius:11px;background:#f0f0f2}
+.ok{background:#e9f7ec!important}.warn{background:#fff5df!important}
+.item{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #ddd}
+.item:last-child{border-bottom:0}.item img{width:64px;height:64px;border-radius:9px;background:#eee}
+.grow{flex:1;min-width:0}.item b{display:block}.item small{color:#666}
+.detail{padding:14px;background:#f6f6f8;border-radius:13px;margin-top:10px}.detail a{color:#06c;word-break:break-all}
+.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.actions button{padding:9px 11px;font-size:14px}
+#storageStatus{margin:10px auto;max-width:640px;padding:10px 14px;border-radius:10px;background:#f3f3f3;font-size:14px}
+</style>
+</head>
+<body>
+<div id="storageStatus">Kaffekoder gemmes lokalt på denne enhed med IndexedDB.</div>
+<main>
+<h1>Kaffekode</h1>
+<p class="intro">En enkel kode til single-dose kaffetuber.</p>
+
+<div class="card">
+<h2>1. Lav din kode</h2>
+<canvas id="maker" width="900" height="900" aria-label="Tegneflade til kaffekode"></canvas>
+<p class="small"><b>Tryk på de 12 felter i gitteret for at slå prikker til og fra. De fire store hjørneprikker er faste og afgrænser koden.</b> De fire hjørneprikker er faste; gitterlinjerne er kun hjælpelinjer og skal ikke tegnes på tuben.</p>
+<div class="row"><button id="random">Tilfældig</button><button id="clear" class="light">Ryd</button></div>
+<label>Kaffens navn</label><input id="name" placeholder="fx Ethiopia Guji">
+<label>Beskrivelse</label><textarea id="description" placeholder="Fx 20 g · lysristet · citrus · jasmin"></textarea>
+<label>Link (valgfrit)</label><input id="link" type="url" placeholder="https://...">
+<div class="row"><button id="save">Gem kode</button><button id="download" class="light">Gem symbol</button></div>
+<div id="status">Vælg nogle prikker og gem kaffen.</div>
+</div>
+
+<div class="card">
+<h2>2. Scan en tube</h2>
+<input id="photo" type="file" accept="image/*" capture="environment">
+<p class="small">Tag et tæt foto med hele koden. God kontrast hjælper. På en buet tube: hold koden midt i billedet.</p>
+<div id="scanResult"></div>
+</div>
+
+<div class="card">
+<h2>3. Mine kaffekoder</h2>
+<div id="saved"></div>
+</div>
+
+<div class="card">
+<h2>4. Data og sikkerhedskopi</h2>
+<p class="small">Eksportér en backup før du rydder Safari-data. Import kan gendanne dine kaffekoder.</p>
+<div class="row"><button id="exportBtn">Eksportér</button><button id="importBtn" class="light">Importér</button></div>
+<input id="importFile" type="file" accept=".json,application/json" hidden>
+<div class="row"><button id="deleteAllBtn" class="danger">Slet alle kaffekoder</button></div>
+</div>
+</main>
+
+<script>
+const DB_NAME="KaffekodeDB", STORE="coffees", DB_VERSION=1;
+let bits=Array(12).fill(0);
+
+function dbOpen(){
+ return new Promise((res,rej)=>{
+  const r=indexedDB.open(DB_NAME,DB_VERSION);
+  r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE,{keyPath:"id"})};
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+ });
+}
+async function dbAll(){
+ const db=await dbOpen();
+ return new Promise((res,rej)=>{const r=db.transaction(STORE,"readonly").objectStore(STORE).getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)});
+}
+async function dbPut(rec){
+ const db=await dbOpen();
+ return new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).put(rec);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});
+}
+async function dbDelete(id){
+ const db=await dbOpen();
+ return new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).delete(id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});
+}
+async function dbClear(){
+ const db=await dbOpen();
+ return new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});
+}
+
+const canvas=document.getElementById("maker"),ctx=canvas.getContext("2d");
+function gridCells(){const a=[];for(let r=0;r<4;r++)for(let c=0;c<4;c++)if(!((r===0||r===3)&&(c===0||c===3)))a.push([r,c]);return a}
+function draw(){
+ const W=canvas.width,H=canvas.height,pad=95,cell=(W-2*pad)/4;
+ ctx.clearRect(0,0,W,H);ctx.fillStyle="#fff";ctx.fillRect(0,0,W,H);
+ ctx.strokeStyle="#d2d2d7";ctx.lineWidth=5;ctx.strokeRect(pad,pad,W-2*pad,H-2*pad);
+ for(let r=0;r<4;r++)for(let c=0;c<4;c++){
+  const x=pad+(c+.5)*cell,y=pad+(r+.5)*cell;
+  const corner=(r===0||r===3)&&(c===0||c===3),rad=corner?38:29;
+  ctx.beginPath();ctx.arc(x,y,rad,0,Math.PI*2);
+  ctx.fillStyle=corner?"#111":bits[gridCells().findIndex(v=>v[0]===r&&v[1]===c)]?"#111":"#fff";ctx.fill();
+  ctx.strokeStyle=corner?"#111":"#b9b9be";ctx.lineWidth=corner?3:5;ctx.stroke();
+ }
+}
+function canvasPoint(e){
+ const r=canvas.getBoundingClientRect(), sx=canvas.width/r.width, sy=canvas.height/r.height;
+ return {x:(e.clientX-r.left)*sx,y:(e.clientY-r.top)*sy};
+}
+canvas.addEventListener("pointerdown",e=>{
+ e.preventDefault();const p=canvasPoint(e),pad=95,cell=(900-2*pad)/4;
+ const c=Math.floor((p.x-pad)/cell),r=Math.floor((p.y-pad)/cell);
+ if(r<0||r>3||c<0||c>3)return;
+ if((r===0||r===3)&&(c===0||c===3))return;
+ const i=gridCells().findIndex(v=>v[0]===r&&v[1]===c);if(i>=0){bits[i]^=1;draw();updateStatus()}
+});
+function updateStatus(){document.getElementById("status").textContent="Kode: "+bits.join("")+" · "+bits.filter(Boolean).length+" sorte prikker"}
+document.getElementById("random").onclick=()=>{bits=bits.map(()=>Math.random()<.5?1:0);draw();updateStatus()};
+document.getElementById("clear").onclick=()=>{bits=Array(12).fill(0);draw();updateStatus()};
+
+function symbolData(){
+ const c=document.createElement("canvas");c.width=900;c.height=900;const x=c.getContext("2d"),pad=80,cell=(900-2*pad)/4;
+ x.fillStyle="#fff";x.fillRect(0,0,900,900);
+ // Physical symbol: four large fixed corner markers + 12 optional data dots. No grid lines are stored.
+ for(let r=0;r<4;r++)for(let col=0;col<4;col++){
+  const px=pad+(col+.5)*cell,py=pad+(r+.5)*cell,corner=(r===0||r===3)&&(col===0||col===3);
+  if(corner){x.fillStyle="#111";x.beginPath();x.arc(px,py,42,0,7);x.fill();}
+ }
+ const cells=gridCells();x.fillStyle="#111";
+ cells.forEach(([r,col],i)=>{if(bits[i]){const px=pad+(col+.5)*cell,py=pad+(r+.5)*cell;x.beginPath();x.arc(px,py,31,0,7);x.fill()}});
+ return c.toDataURL("image/png");
+}
+document.getElementById("download").onclick=()=>{
+ const a=document.createElement("a");a.href=symbolData();a.download="kaffekode-"+bits.join("")+".png";a.click();
+};
+
+async function renderSaved(){
+ const list=document.getElementById("saved"),arr=await dbAll();list.innerHTML="";
+ if(!arr.length){list.innerHTML='<p class="small">Ingen gemte kaffekoder endnu.</p>';return}
+ arr.sort((a,b)=>(b.created||"").localeCompare(a.created||""));
+ for(const r of arr){
+  const div=document.createElement("div");div.className="item";
+  const img=document.createElement("img");img.src=r.image||symbolData();
+  const grow=document.createElement("div");grow.className="grow";
+  const b=document.createElement("b");b.textContent=r.name||"Uden navn";
+  const sm=document.createElement("small");sm.textContent="Kode: "+r.code;
+  grow.append(b,sm);
+  const actions=document.createElement("div");actions.className="actions";
+  const show=document.createElement("button");show.textContent="Beskrivelse";show.onclick=()=>showDetail(r,div);
+  const del=document.createElement("button");del.textContent="Slet";del.className="danger";del.onclick=async()=>{if(confirm("Slet "+(r.name||"denne kaffe")+"?")){await dbDelete(r.id);renderSaved()}};
+  actions.append(show,del);grow.append(actions);div.append(img,grow);list.append(div);
+ }
+}
+function showDetail(r,parent){
+ let d=parent.querySelector(".detail");if(d){d.remove();return}
+ d=document.createElement("div");d.className="detail";
+ const p=document.createElement("div");p.textContent=r.description||"Ingen beskrivelse.";
+ d.append(p);
+ if(r.link){const a=document.createElement("a");a.href=r.link;a.target="_blank";a.rel="noopener";a.textContent="Åbn link";d.append(document.createElement("br"),a)}
+ parent.append(d);
+}
+document.getElementById("save").onclick=async()=>{
+ const name=document.getElementById("name").value.trim();
+ if(!name){alert("Skriv kaffens navn først.");return}
+ const rec={id:crypto.randomUUID?crypto.randomUUID():String(Date.now()),name,description:document.getElementById("description").value.trim(),link:document.getElementById("link").value.trim(),code:bits.join(""),image:symbolData(),created:new Date().toISOString()};
+ await dbPut(rec);await renderSaved();document.getElementById("status").textContent="Gemt: "+name;
+};
+
+function downloadBackup(records){
+ const payload={app:"Kaffekode",format:"kaffekode-backup",version:1,exportedAt:new Date().toISOString(),coffees:records};
+ const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),u=URL.createObjectURL(blob),a=document.createElement("a");
+ a.href=u;a.download="kaffekode-backup.json";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
+}
+document.getElementById("exportBtn").onclick=async()=>{const r=await dbAll();downloadBackup(r)};
+document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
+document.getElementById("importFile").onchange=async e=>{
+ const f=e.target.files[0];e.target.value="";if(!f)return;
+ try{const p=JSON.parse(await f.text());if(!p||p.app!=="Kaffekode"||!Array.isArray(p.coffees))throw 0;
+  if(!confirm("Import erstatter de nuværende kaffekoder. Fortsæt?"))return;
+  await dbClear();for(const r of p.coffees)await dbPut({...r,id:String(r.id||crypto.randomUUID?.()||Date.now()+Math.random())});
+  await renderSaved();alert("Kaffedata importeret.");
+ }catch(_){alert("Filen kunne ikke importeres som Kaffekode-backup.")}
+};
+document.getElementById("deleteAllBtn").onclick=async()=>{
+ const r=await dbAll();if(!r.length){alert("Der er ingen kaffekoder at slette.");return}
+ if(confirm("Slet ALLE kaffekoder? Det kan kun fortrydes med en backup.")){await dbClear();await renderSaved();alert("Alle kaffekoder er slettet.")}
+};
+
+// Robust grid scanner: four large corner markers define the square.
+// The scanner rectifies the photographed quadrilateral and then samples a 4x4 grid.
+function loadImage(file){return new Promise((res,rej)=>{const im=new Image(),u=URL.createObjectURL(file);im.onload=()=>{const max=1600,s=Math.min(1,max/Math.max(im.naturalWidth,im.naturalHeight)),c=document.createElement("canvas");c.width=Math.round(im.naturalWidth*s);c.height=Math.round(im.naturalHeight*s);c.getContext("2d").drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);res(c)};im.onerror=rej;im.src=u})}
+function grayAt(data,w,x,y){const p=(y*w+x)*4;return .299*data[p]+.587*data[p+1]+.114*data[p+2]}
+function homography(src,dst){
+ const A=[],b=[];
+ for(let i=0;i<4;i++){const x=src[i].x,y=src[i].y,u=dst[i].x,v=dst[i].y;
+  A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);
+  A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v);
+ }
+ for(let i=0;i<8;i++){
+  let m=i;for(let r=i+1;r<8;r++)if(Math.abs(A[r][i])>Math.abs(A[m][i]))m=r;
+  [A[i],A[m]]=[A[m],A[i]];[b[i],b[m]]=[b[m],b[i]];
+  if(Math.abs(A[i][i])<1e-9)return null;
+  const q=A[i][i];for(let j=i;j<8;j++)A[i][j]/=q;b[i]/=q;
+  for(let r=0;r<8;r++)if(r!==i){const f=A[r][i];if(!f)continue;for(let j=i;j<8;j++)A[r][j]-=f*A[i][j];b[r]-=f*b[i];}
+ }
+ return [...b,1];
+}
+function warpPoint(H,x,y){const q=H[6]*x+H[7]*y+1;return {x:(H[0]*x+H[1]*y+H[2])/q,y:(H[3]*x+H[4]*y+H[5])/q}}
+function orderCorners(a){
+ const cx=a.reduce((s,p)=>s+p.x,0)/4,cy=a.reduce((s,p)=>s+p.y,0)/4;
+ return a.slice().sort((p,q)=>Math.atan2(p.y-cy,p.x-cx)-Math.atan2(q.y-cy,q.x-cx));
+}
+function cornerError(a){
+ // After angular ordering, require a sensible convex quadrilateral.
+ let area=0;for(let i=0;i<4;i++){const p=a[i],q=a[(i+1)%4];area+=p.x*q.y-q.x*p.y}area=Math.abs(area)/2;
+ const ds=[];for(let i=0;i<4;i++){const p=a[i],q=a[(i+1)%4];ds.push(Math.hypot(p.x-q.x,p.y-q.y))}
+ const mean=ds.reduce((x,y)=>x+y,0)/4;return {area,ratio:Math.max(...ds)/Math.max(1,Math.min(...ds)),mean};
+}
+function scanImage(c){
+ const w=c.width,h=c.height,g=c.getContext("2d",{willReadFrequently:true}),data=g.getImageData(0,0,w,h).data;
+ let vals=[];for(let y=0;y<h;y+=12)for(let x=0;x<w;x+=12)vals.push(grayAt(data,w,x,y));
+ vals.sort((a,b)=>a-b);const th=Math.max(35,Math.min(170,vals[Math.floor(vals.length*.28)]));
+ const mask=new Uint8Array(w*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++)mask[y*w+x]=grayAt(data,w,x,y)<th;
+ const seen=new Uint8Array(w*h),cs=[],q=new Int32Array(w*h);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  const z=y*w+x;if(!mask[z]||seen[z])continue;let head=0,tail=0,minx=x,maxx=x,miny=y,maxy=y,n=0;
+  q[tail++]=z;seen[z]=1;
+  while(head<tail){const id=q[head++],yy=Math.floor(id/w),xx=id-yy*w;n++;minx=Math.min(minx,xx);maxx=Math.max(maxx,xx);miny=Math.min(miny,yy);maxy=Math.max(maxy,yy);
+   const ns=[id-1,id+1,id-w,id+w];for(const ni of ns){if(ni<0||ni>=w*h)continue;const nx=ni%w;if(Math.abs(nx-xx)>1)continue;if(mask[ni]&&!seen[ni]){seen[ni]=1;q[tail++]=ni}}
+  }
+  const bw=maxx-minx+1,bh=maxy-miny+1,ratio=Math.max(bw,bh)/Math.max(1,Math.min(bw,bh));
+  if(n>18&&n<w*h*.08&&ratio<1.75)cs.push({x:(minx+maxx)/2,y:(miny+maxy)/2,n,w:bw,h:bh,ratio});
+ }
+ if(cs.length<4)return null;
+ // Four corner markers are intentionally larger than data dots.
+ const cand=cs.slice().sort((a,b)=>b.n-a.n).slice(0,Math.min(18,cs.length));
+ let best=null,bestScore=Infinity;
+ for(let a=0;a<cand.length;a++)for(let b=a+1;b<cand.length;b++)for(let d=b+1;d<cand.length;d++)for(let e=d+1;e<cand.length;e++){
+  const ar=orderCorners([cand[a],cand[b],cand[d],cand[e]]), ce=cornerError(ar);
+  if(ce.area<Math.max(400,w*h*.003)||ce.ratio>2.7)continue;
+  const sizes=ar.map(p=>p.n),spread=Math.max(...sizes)/Math.max(1,Math.min(...sizes));
+  if(spread>3.5)continue;
+  // Prefer large, similar markers and a compact square-ish quadrilateral.
+  const score=(1/Math.max(1,Math.min(...sizes))) * ce.ratio + (spread-1)*.7;
+  if(score<bestScore){bestScore=score;best=ar}
+ }
+ if(!best)return null;
+ // Reorder to top-left, top-right, bottom-right, bottom-left.
+ const sum=p=>p.x+p.y,diff=p=>p.x-p.y;
+ const tl=best.slice().sort((a,b)=>sum(a)-sum(b))[0],br=best.slice().sort((a,b)=>sum(b)-sum(a))[0];
+ const tr=best.slice().sort((a,b)=>diff(b)-diff(a))[0],bl=best.find(p=>p!==tl&&p!==br&&p!==tr);
+ if(!tl||!tr||!br||!bl)return null;
+ const src=[tl,tr,br,bl],S=900;
+ const H=homography([{x:80,y:80},{x:S-80,y:80},{x:S-80,y:S-80},{x:80,y:S-80}],src);if(!H)return null;
+ // Sample a 4x4 grid. Outer cells are the fixed corner markers; the 12 inner cells encode data.
+ // Data positions are row-major excluding the four corners: 12 bits.
+ const bits=[];
+ const cells=[];for(let r=0;r<4;r++)for(let col=0;col<4;col++)if(!((r===0||r===3)&&(col===0||col===3)))cells.push([r,col]);
+ for(const [r,col] of cells){
+  const cx=80+(col+.5)*(S-160)/4,cy=80+(r+.5)*(S-160)/4;
+  let dark=0,total=0;
+  const rad=(S-160)/4*.24;
+  for(let yy=-rad;yy<=rad;yy+=3)for(let xx=-rad;xx<=rad;xx+=3){if(xx*xx+yy*yy>rad*rad)continue;const p=warpPoint(H,cx+xx,cy+yy),ix=Math.round(p.x),iy=Math.round(p.y);if(ix>=0&&ix<w&&iy>=0&&iy<h){total++;if(grayAt(data,w,ix,iy)<th)dark++}}
+  bits.push(total&&dark/total>.32?1:0);
+ }
+ // Require the four anchors to actually be dark and strong.
+ const anchorStrength=[];for(const p of src){let dark=0,total=0;const rad=Math.max(4,Math.min(p.w,p.h)*.35);for(let yy=-rad;yy<=rad;yy+=2)for(let xx=-rad;xx<=rad;xx+=2){const ix=Math.round(p.x+xx),iy=Math.round(p.y+yy);if(ix>=0&&ix<w&&iy>=0&&iy<h){total++;if(grayAt(data,w,ix,iy)<th)dark++}}anchorStrength.push(dark/Math.max(1,total))}
+ if(anchorStrength.some(v=>v<.35))return null;
+ return bits;
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+
+draw();updateStatus();renderSaved();
+</script>
+</body>
+</html>
