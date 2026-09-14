@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<title>Kaffekode</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f3f7;color:#111;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif}
+main{max-width:620px;margin:auto;padding:18px 15px 45px}h1{font-size:30px;margin:4px 0}.intro{color:#666;margin:0 0 18px}
+.card{background:#fff;border-radius:20px;padding:18px;margin:14px 0;box-shadow:0 2px 12px #0001}h2{font-size:20px;margin:0 0 12px}
+#maker{width:min(82vw,360px);display:block;margin:12px auto;touch-action:manipulation;background:#fff;border-radius:16px}
+.row{display:flex;gap:8px;margin-top:10px}.row>*{flex:1}button{border:0;border-radius:13px;padding:13px 10px;font:inherit;background:#111;color:#fff}.light{background:#e7e7ec;color:#111}
+input,textarea{width:100%;padding:12px;border:1px solid #ccc;border-radius:11px;font:inherit}textarea{min-height:100px;resize:vertical}
+label{display:block;color:#666;font-size:14px;margin:13px 0 5px}.small{font-size:13px;color:#666;line-height:1.45}
+#status{margin-top:12px;padding:11px;border-radius:11px;background:#f0f0f2}.item{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #ddd}.item img{width:64px;height:64px;border-radius:9px}.grow{flex:1}
+.detail{padding:14px;background:#f6f6f8;border-radius:13px;margin-top:10px}.detail a{color:#06c;word-break:break-all}
+</style>
+</head>
+<body>
+<main>
+<h1>Kaffekode</h1>
+<p class="intro">En simpel kode til single-dose kaffetuber. Koden på tuben peger på dine egne kaffeoplysninger.</p>
+
+<div class="card">
+<h2>1. Lav din kode</h2>
+<canvas id="maker" width="900" height="900"></canvas>
+<p class="small">Tryk på de 8 cirkler for at vælge mønsteret. Midtercirklen og topmarkøren er faste. Der er 256 mulige mønstre.</p>
+<div class="row"><button id="random">Tilfældig</button><button id="clear" class="light">Ryd</button></div>
+
+<label>Kaffens navn</label><input id="name" placeholder="fx Ethiopia Guji">
+
+<label>Beskrivelse</label>
+<textarea id="description" placeholder="Fx 20 g · lysristet · noter om smag, bryggeopskrift, producent osv."></textarea>
+
+<label>Link til beskrivelse / rister / opskrift (valgfrit)</label>
+<input id="link" type="url" placeholder="https://...">
+
+<div class="row"><button id="save">Gem kode</button><button id="download" class="light">Gem symbol</button></div>
+<div id="status">Tegn symbolet på tuben efter billedet.</div>
+</div>
+
+<div class="card">
+<h2>2. Scan en tube</h2>
+<input id="photo" type="file" accept="image/*" capture="environment">
+<p class="small">Tag et billede, hvor hele symbolet er synligt og har god kontrast. Programmet forsøger at aflæse de 8 markeringer og finde kaffen.</p>
+<div id="scanResult"></div>
+</div>
+
+<div class="card">
+<h2>3. Mine kaffekoder</h2>
+<div id="saved"></div>
+</div>
+</main>
+
+<script>
+const canvas=document.querySelector('#maker'),ctx=canvas.getContext('2d'),state=Array(8).fill(false);
+const pos=Array.from({length:8},(_,i)=>{const a=i*Math.PI/4-Math.PI/2;return [Math.cos(a),Math.sin(a)]});
+
+function draw(){
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,900,900);
+ ctx.strokeStyle='#111';ctx.lineWidth=8;
+ ctx.beginPath();ctx.arc(450,450,330,0,Math.PI*2);ctx.stroke();
+ ctx.fillStyle='#111';ctx.beginPath();ctx.arc(450,450,72,0,Math.PI*2);ctx.fill();
+ for(let i=0;i<8;i++){
+   const x=450+pos[i][0]*235,y=450+pos[i][1]*235;
+   ctx.fillStyle=state[i]?'#111':'#fff';ctx.strokeStyle='#111';ctx.lineWidth=8;
+   ctx.beginPath();ctx.arc(x,y,58,0,Math.PI*2);ctx.fill();ctx.stroke();
+ }
+ ctx.fillStyle='#111';ctx.beginPath();ctx.roundRect(420,48,60,32,16);ctx.fill();
+}
+canvas.addEventListener('click',e=>{
+ const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left)*900/r.width,y=(e.clientY-r.top)*900/r.height;
+ let best=-1,dist=1e9;
+ pos.forEach((v,i)=>{const d=Math.hypot(x-(450+v[0]*235),y-(450+v[1]*235));if(d<dist){dist=d;best=i}});
+ if(dist<105){state[best]=!state[best];draw()}
+});
+function code(){return state.map(x=>x?'1':'0').join('')}
+function msg(t){document.querySelector('#status').textContent=t}
+document.querySelector('#random').onclick=()=>{for(let i=0;i<8;i++)state[i]=Math.random()>.5;draw()};
+document.querySelector('#clear').onclick=()=>{state.fill(false);draw()};
+document.querySelector('#download').onclick=()=>{const a=document.createElement('a');a.href=canvas.toDataURL('image/png');a.download='kaffekode-symbol.png';a.click()};
+
+document.querySelector('#save').onclick=()=>{
+ const name=document.querySelector('#name').value.trim();
+ if(!name){msg('Skriv kaffens navn først.');return}
+ const a=JSON.parse(localStorage.getItem('kaffekoder')||'[]'),c=code();
+ if(a.some(x=>x.code===c)){msg('Dette symbol er allerede brugt. Vælg et andet mønster.');return}
+ a.unshift({name,description:document.querySelector('#description').value.trim(),link:document.querySelector('#link').value.trim(),code:c,img:canvas.toDataURL('image/png')});
+ localStorage.setItem('kaffekoder',JSON.stringify(a));show();msg('Gemt: '+name);
+};
+
+function show(){
+ const a=JSON.parse(localStorage.getItem('kaffekoder')||'[]'),el=document.querySelector('#saved');el.innerHTML='';
+ if(!a.length){el.innerHTML='<p class="small">Ingen gemte koder endnu.</p>';return}
+ a.forEach((v,i)=>{
+   const d=document.createElement('div');d.className='item';
+   const im=document.createElement('img');im.src=v.img;
+   const g=document.createElement('div');g.className='grow';g.innerHTML='<b>'+safe(v.name)+'</b><br><span class="small">Kode '+v.code+'</span>';
+   const b=document.createElement('button');b.className='light';b.textContent='Beskrivelse';
+   b.onclick=()=>details(v);
+   d.append(im,g,b);el.append(d)
+ })
+}
+function details(v){
+ const el=document.querySelector('#scanResult');
+ el.innerHTML='<div class="detail"><h3 style="margin:0 0 8px">'+safe(v.name)+'</h3>'+
+   (v.description?'<p style="white-space:pre-wrap">'+safe(v.description)+'</p>':'')+
+   (v.link?'<p><a href="'+safeAttr(v.link)+'" target="_blank" rel="noopener">Åbn link</a></p>':'<p class="small">Intet link gemt.</p>')+
+   '</div>';
+ el.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function safe(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function safeAttr(s){return safe(s).replace(/javascript:/gi,'')}
+
+/* Prototype image reader. It works best with a close, straight-on photo of the symbol. */
+document.querySelector('#photo').addEventListener('change',e=>{
+ const f=e.target.files[0];if(!f)return;
+ const im=new Image();im.onload=()=>scan(im);im.src=URL.createObjectURL(f);
+});
+function scan(im){
+ const max=1000,sc=Math.min(1,max/Math.max(im.width,im.height)),w=Math.round(im.width*sc),h=Math.round(im.height*sc);
+ const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.drawImage(im,0,0,w,h);
+ const d=x.getImageData(0,0,w,h).data;
+ let minX=w,minY=h,maxX=-1,maxY=-1,n=0;
+ for(let y=0;y<h;y+=3)for(let q=0;q<w;q+=3){const p=(y*w+q)*4,v=(d[p]+d[p+1]+d[p+2])/3;if(v<70){minX=Math.min(minX,q);minY=Math.min(minY,y);maxX=Math.max(maxX,q);maxY=Math.max(maxY,y);n++}}
+ if(n<100){msg('Kunne ikke finde symbolet.');return}
+ const cx=(minX+maxX)/2,cy=(minY+maxY)/2,rad=Math.min(maxX-minX,maxY-minY)*.31;
+ let out=[];
+ for(const p of pos){
+   const px=cx+p[0]*rad,py=cy+p[1]*rad,r=rad*.25;let sum=0,cnt=0;
+   for(let yy=Math.max(0,Math.floor(py-r));yy<Math.min(h,Math.ceil(py+r));yy++)
+    for(let xx=Math.max(0,Math.floor(px-r));xx<Math.min(w,Math.ceil(px+r));xx++){const k=(yy*w+xx)*4;sum+=(d[k]+d[k+1]+d[k+2])/3;cnt++}
+   out.push(sum/cnt<145?'1':'0')
+ }
+ const center=(d[(Math.floor(cy)*w+Math.floor(cx))*4]+d[(Math.floor(cy)*w+Math.floor(cx))*4+1]+d[(Math.floor(cy)*w+Math.floor(cx))*4+2])/3;
+ if(center>120){msg('Midtercirklen blev ikke fundet sikkert.');return}
+ const cde=out.join(''),a=JSON.parse(localStorage.getItem('kaffekoder')||'[]'),found=a.find(v=>v.code===cde);
+ if(found){details(found);msg('Kode fundet.')}
+ else{document.querySelector('#scanResult').innerHTML='<div class="detail"><b>Symbolet blev læst:</b> '+cde+'<br><span class="small">Det findes ikke blandt dine gemte koder.</span></div>';msg('Symbol læst, men ikke fundet.')}
+}
+draw();show();
+</script>
+</body>
+</html>
