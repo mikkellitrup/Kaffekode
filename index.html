@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<title>Kaffekode</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f3f3f7;color:#111;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif}
+main{max-width:640px;margin:auto;padding:18px 15px 50px}
+h1{font-size:30px;margin:4px 0}.intro{color:#666;margin:0 0 18px}
+.card{background:#fff;border-radius:20px;padding:18px;margin:14px 0;box-shadow:0 2px 12px #0001}
+h2{font-size:20px;margin:0 0 12px}
+#maker{width:min(86vw,380px);height:auto;display:block;margin:12px auto;background:#fff;border-radius:16px;touch-action:none}
+.row{display:flex;gap:8px;margin-top:10px}.row>*{flex:1}
+button{border:0;border-radius:13px;padding:13px 10px;font:inherit;background:#111;color:#fff;cursor:pointer}
+.light{background:#e7e7ec;color:#111}
+.danger{background:#b00020;color:#fff}
+input,textarea{width:100%;padding:12px;border:1px solid #ccc;border-radius:11px;font:inherit}
+textarea{min-height:100px;resize:vertical}
+label{display:block;color:#666;font-size:14px;margin:13px 0 5px}
+.small{font-size:13px;color:#666;line-height:1.45}
+#status,#scanResult{margin-top:12px;padding:11px;border-radius:11px;background:#f0f0f2}
+.ok{background:#e9f7ec!important}.warn{background:#fff5df!important}
+.item{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #ddd}
+.item:last-child{border-bottom:0}.item img{width:64px;height:64px;border-radius:9px;background:#eee}
+.grow{flex:1;min-width:0}.item b{display:block}.item small{color:#666}
+.detail{padding:14px;background:#f6f6f8;border-radius:13px;margin-top:10px}.detail a{color:#06c;word-break:break-all}
+.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.actions button{padding:9px 11px;font-size:14px}
+#storageStatus{margin:10px auto;max-width:640px;padding:10px 14px;border-radius:10px;background:#f3f3f3;font-size:14px}
+</style>
+</head>
+<body>
+<div id="storageStatus">Kaffekoder gemmes lokalt på denne enhed med IndexedDB.</div>
+<main>
+<h1>Kaffekode</h1>
+<p class="intro">En enkel kode til single-dose kaffetuber.</p>
+
+<div class="card">
+<h2>1. Lav din kode</h2>
+<label>Kodetype</label><select id="codeType" style="width:100%;padding:12px;border:1px solid #ccc;border-radius:11px;font:inherit"><option value="original">Original 4×4-kode (12 felter)</option><option value="3x3">3×3-felt (9 felter)</option></select>
+<canvas id="maker" width="900" height="900" aria-label="Tegneflade til kaffekode"></canvas>
+<p id="makerHelp" class="small"><b>Original:</b> De fire store hjørneprikker er faste. Tryk på de 12 felter for at slå prikker til og fra. Gitterlinjerne skal ikke tegnes på tuben.</p>
+<div class="row"><button id="random">Tilfældig</button><button id="clear" class="light">Ryd</button></div>
+<label>Kaffens navn</label><input id="name" placeholder="fx Ethiopia Guji">
+<label>Beskrivelse</label><textarea id="description" placeholder="Fx 20 g · lysristet · citrus · jasmin"></textarea>
+<label>Link (valgfrit)</label><input id="link" type="url" placeholder="https://...">
+<div class="row"><button id="save">Gem kode</button><button id="cancelEdit" style="display:none">Annullér redigering</button><button id="download" class="light">Gem symbol</button></div>
+<div id="status">Vælg nogle prikker og gem kaffen.</div>
+</div>
+
+<div class="card">
+<h2>2. Scan en tube</h2>
+<input id="photo" type="file" accept="image/*" capture="environment">
+<p class="small">Tag et tæt foto med hele koden. God kontrast hjælper. På en buet tube: hold koden midt i billedet.</p>
+<div id="scanResult"></div>
+</div>
+
+<div class="card">
+<h2>3. Mine kaffekoder</h2>
+<div id="saved"></div>
+</div>
+
+<div class="card">
+<h2>4. Data og sikkerhedskopi</h2>
+<p class="small">Eksportér en backup før du rydder Safari-data. Import kan gendanne dine kaffekoder.</p>
+<div class="row"><button id="exportBtn">Eksportér</button><button id="importBtn" class="light">Importér</button></div>
+<input id="importFile" type="file" accept=".json,application/json" hidden>
+<div class="row"><button id="deleteAllBtn" class="danger">Slet alle kaffekoder</button></div>
+</div>
+</main>
+
+<script>
+const DB_NAME="KaffekodeDB", STORE="coffees", DB_VERSION=1;
+let bits=Array(12).fill(0), codeType="original";
+
+function dbOpen(){
+ return new Promise((res,rej)=>{
+  const r=indexedDB.open(DB_NAME,DB_VERSION);
+  r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE,{keyPath:"id"})};
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+ });
+}
+async function dbAll(){
+ const db=await dbOpen();
+ return new Promise((res,rej)=>{const r=db.transaction(STORE,"readonly").objectStore(STORE).getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)});
+}
+async function dbPut(rec){
+ const db=await dbOpen();
+ return new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).put(rec);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});
+}
+async function dbDelete(id){
+ const db=await dbOpen();
+ return new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).delete(id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});
+}
+async function dbClear(){
+ const db=await dbOpen();
+ return new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});
+}
+
+const canvas=document.getElementById("maker"),ctx=canvas.getContext("2d");
+function gridCells(){const a=[];for(let r=0;r<4;r++)for(let c=0;c<4;c++)if(!((r===0||r===3)&&(c===0||c===3)))a.push([r,c]);return a}
+function cells3(){const a=[];for(let r=0;r<3;r++)for(let c=0;c<3;c++)a.push([r,c]);return a}
+function activeCells(){return codeType==="3x3"?cells3():gridCells()}
+function draw(){
+ const W=canvas.width,H=canvas.height,pad=95;
+ ctx.clearRect(0,0,W,H);ctx.fillStyle="#fff";ctx.fillRect(0,0,W,H);
+ if(codeType==="3x3"){
+  const size=W-2*pad;
+  const x0=pad,y0=pad,x1=pad+size,y1=pad+size,cell=size/3;
+  // Retningsmarkør: lille vandret streg over øverste venstre hjørne.
+  ctx.fillStyle="#111";ctx.beginPath();ctx.roundRect(x0+28,y0-62,92,20,10);ctx.fill();
+  // Den fysiske kode er præcis denne firkant: yderramme + 2 vandrette + 2 lodrette linjer.
+  ctx.strokeStyle="#111";ctx.lineWidth=12;ctx.lineJoin="round";ctx.lineCap="round";
+  ctx.strokeRect(x0,y0,size,size);
+  for(let i=1;i<3;i++){
+   ctx.beginPath();ctx.moveTo(x0+i*cell,y0);ctx.lineTo(x0+i*cell,y1);ctx.stroke();
+   ctx.beginPath();ctx.moveTo(x0,y0+i*cell);ctx.lineTo(x1,y0+i*cell);ctx.stroke();
+  }
+  // Farv hele feltet, men hold lidt luft til gitterlinjerne så en håndtegnet streg ikke blander sig med nabofeltet.
+  ctx.fillStyle="#111";
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++)if(bits[r*3+c]){
+   const m=cell*.14;ctx.fillRect(x0+c*cell+m,y0+r*cell+m,cell-2*m,cell-2*m);
+  }
+ }else{
+  const cell=(W-2*pad)/4;
+  ctx.fillStyle="#111";ctx.beginPath();ctx.roundRect(pad-18,pad-58,54,16,8);ctx.fill();
+  ctx.strokeStyle="#d2d2d7";ctx.lineWidth=5;ctx.strokeRect(pad,pad,W-2*pad,H-2*pad);
+  for(let r=0;r<4;r++)for(let c=0;c<4;c++){
+   const x=pad+(c+.5)*cell,y=pad+(r+.5)*cell,corner=(r===0||r===3)&&(c===0||c===3),rad=corner?38:29;
+   ctx.beginPath();ctx.arc(x,y,rad,0,Math.PI*2);ctx.fillStyle=corner?"#111":bits[gridCells().findIndex(v=>v[0]===r&&v[1]===c)]?"#111":"#fff";ctx.fill();ctx.strokeStyle=corner?"#111":"#b9b9be";ctx.lineWidth=corner?3:5;ctx.stroke();
+  }
+ }
+}
+function canvasPoint(e){const r=canvas.getBoundingClientRect(),sx=canvas.width/r.width,sy=canvas.height/r.height;return{x:(e.clientX-r.left)*sx,y:(e.clientY-r.top)*sy}}
+canvas.addEventListener("pointerdown",e=>{
+ e.preventDefault();const p=canvasPoint(e),pad=95;
+ if(codeType==="3x3"){
+  const size=900-2*pad,cell=size/3,c=Math.floor((p.x-pad)/cell),r=Math.floor((p.y-pad)/cell);
+  if(r<0||r>2||c<0||c>2)return;bits[r*3+c]^=1;
+ }else{
+  const cell=(900-2*pad)/4,c=Math.floor((p.x-pad)/cell),r=Math.floor((p.y-pad)/cell);
+  if(r<0||r>3||c<0||c>3||((r===0||r===3)&&(c===0||c===3)))return;
+  const i=gridCells().findIndex(v=>v[0]===r&&v[1]===c);if(i>=0)bits[i]^=1;
+ }
+ draw();updateStatus();
+});
+function updateStatus(){document.getElementById("status").textContent="Kode: "+bits.join("")+" · "+bits.filter(Boolean).length+" sorte felter · "+(codeType==="3x3"?"3×3":"original 4×4")}
+document.getElementById("codeType").onchange=e=>{codeType=e.target.value;bits=Array(codeType==="3x3"?9:12).fill(0);document.getElementById("makerHelp").innerHTML=codeType==="3x3"?"<b>3×3:</b> Tegn yderrammen og de fire indvendige gitterlinjer som vist. Farv de felter, du vil kode. Den lille vandrette streg over øverste venstre hjørne er retningsmarkøren.":"<b>Original:</b> De fire store hjørneprikker er faste. Tryk på de 12 felter for at slå prikker til og fra. Gitterlinjerne skal ikke tegnes på tuben.";draw();updateStatus()};
+document.getElementById("random").onclick=()=>{bits=bits.map(()=>Math.random()<.5?1:0);draw();updateStatus()};
+document.getElementById("clear").onclick=()=>{bits=Array(codeType==="3x3"?9:12).fill(0);draw();updateStatus()};
+function symbolData(){
+ const c=document.createElement("canvas");c.width=900;c.height=900;const x=c.getContext("2d"),pad=80;
+ x.fillStyle="#fff";x.fillRect(0,0,900,900);x.fillStyle="#111";
+ x.beginPath();x.roundRect(pad-18,pad-58,54,16,8);x.fill();
+ if(codeType==="3x3"){
+  const size=900-2*pad,x0=pad,y0=pad,cell=size/3;
+  x.beginPath();x.roundRect(x0+28,y0-62,92,20,10);x.fill();
+  x.strokeStyle="#111";x.lineWidth=12;x.lineJoin="round";x.lineCap="round";x.strokeRect(x0,y0,size,size);
+  for(let i=1;i<3;i++){
+   x.beginPath();x.moveTo(x0+i*cell,y0);x.lineTo(x0+i*cell,y0+size);x.stroke();
+   x.beginPath();x.moveTo(x0,y0+i*cell);x.lineTo(x0+size,y0+i*cell);x.stroke();
+  }
+  for(let r=0;r<3;r++)for(let col=0;col<3;col++)if(bits[r*3+col]){const m=cell*.14;x.fillRect(x0+col*cell+m,y0+r*cell+m,cell-2*m,cell-2*m)}
+ }else{
+  const cell=(900-2*pad)/4;
+  for(let r=0;r<4;r++)for(let col=0;col<4;col++){const px=pad+(col+.5)*cell,py=pad+(r+.5)*cell,corner=(r===0||r===3)&&(col===0||col===3);if(corner){x.beginPath();x.arc(px,py,52,0,Math.PI*2);x.fill();}}
+  gridCells().forEach(([r,col],i)=>{if(bits[i]){const px=pad+(col+.5)*cell,py=pad+(r+.5)*cell;x.beginPath();x.arc(px,py,29,0,Math.PI*2);x.fill()}})
+ }
+ return c.toDataURL("image/png");
+}
+document.getElementById("download").onclick=()=>{
+ const a=document.createElement("a");a.href=symbolData();a.download="kaffekode-"+(codeType==="3x3"?"3x3-":"4x4-")+bits.join("")+".png";a.click();
+};
+
+async function renderSaved(){
+ const list=document.getElementById("saved"),arr=await dbAll();list.innerHTML="";
+ if(!arr.length){list.innerHTML='<p class="small">Ingen gemte kaffekoder endnu.</p>';return}
+ arr.sort((a,b)=>(b.created||"").localeCompare(a.created||""));
+ for(const r of arr){
+  const div=document.createElement("div");div.className="item";
+  const img=document.createElement("img");img.src=r.image||symbolData();
+  const grow=document.createElement("div");grow.className="grow";
+  const b=document.createElement("b");b.textContent=r.name||"Uden navn";
+  const sm=document.createElement("small");sm.textContent="Kode: "+r.code+" · "+(r.format==="3x3"?"3×3":"original 4×4");
+  grow.append(b,sm);
+  const actions=document.createElement("div");actions.className="actions";
+  const show=document.createElement("button");show.textContent="Beskrivelse";show.onclick=()=>showDetail(r,div);
+  const edit=document.createElement("button");edit.textContent="Redigér";edit.onclick=()=>editCoffee(r);
+  const del=document.createElement("button");del.textContent="Slet";del.className="danger";del.onclick=async()=>{if(confirm("Slet "+(r.name||"denne kaffe")+"?")){await dbDelete(r.id);renderSaved()}};
+  actions.append(show,edit,del);grow.append(actions);div.append(img,grow);list.append(div);
+ }
+}
+function showDetail(r,parent){
+ let d=parent.querySelector(".detail");if(d){d.remove();return}
+ d=document.createElement("div");d.className="detail";
+ const p=document.createElement("div");p.textContent=r.description||"Ingen beskrivelse.";
+ d.append(p);
+ if(r.link){const a=document.createElement("a");a.href=r.link;a.target="_blank";a.rel="noopener";a.textContent="Åbn link";d.append(document.createElement("br"),a)}
+ parent.append(d);
+}
+let editingId=null;
+function editCoffee(r){
+ editingId=r.id;
+ codeType=r.format||"original";document.getElementById("codeType").value=codeType;
+ document.getElementById("name").value=r.name||"";
+ document.getElementById("description").value=r.description||"";
+ document.getElementById("link").value=r.link||"";
+ bits=(r.code||"").replace(/^3x3:/,"").replace(/^4x4:/,"").split("").map(Number);
+ const n=codeType==="3x3"?9:12;while(bits.length<n)bits.push(0);bits=bits.slice(0,n);
+ draw();updateStatus();
+ document.getElementById("save").textContent="Gem ændringer";
+ document.getElementById("cancelEdit").style.display="inline-block";
+ document.getElementById("maker").scrollIntoView({behavior:"smooth",block:"center"});
+}
+function cancelEdit(){
+ editingId=null;
+ document.getElementById("name").value="";document.getElementById("description").value="";document.getElementById("link").value="";
+ codeType="original";document.getElementById("codeType").value="original";bits=Array(12).fill(0);draw();updateStatus();
+ document.getElementById("save").textContent="Gem kode";
+ document.getElementById("cancelEdit").style.display="none";
+}
+document.getElementById("save").onclick=async()=>{
+ const name=document.getElementById("name").value.trim();
+ if(!name){alert("Skriv kaffens navn først.");return}
+ const rec={id:editingId|| (crypto.randomUUID?crypto.randomUUID():String(Date.now())),name,description:document.getElementById("description").value.trim(),link:document.getElementById("link").value.trim(),code:bits.join(""),format:codeType,image:symbolData(),created:editingId ? ((await dbAll()).find(x=>x.id===editingId)?.created||new Date().toISOString()) : new Date().toISOString()};
+ await dbPut(rec);await renderSaved();document.getElementById("status").textContent=editingId?"Ændringer gemt: "+name:"Gemt: "+name;
+ cancelEdit();
+};
+document.getElementById("cancelEdit").onclick=cancelEdit;
+
+function downloadBackup(records){
+ const payload={app:"Kaffekode",format:"kaffekode-backup",version:1,exportedAt:new Date().toISOString(),coffees:records};
+ const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),u=URL.createObjectURL(blob),a=document.createElement("a");
+ a.href=u;a.download="kaffekode-backup.json";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
+}
+document.getElementById("exportBtn").onclick=async()=>{const r=await dbAll();downloadBackup(r)};
+document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
+document.getElementById("importFile").onchange=async e=>{
+ const f=e.target.files[0];e.target.value="";if(!f)return;
+ try{const p=JSON.parse(await f.text());if(!p||p.app!=="Kaffekode"||!Array.isArray(p.coffees))throw 0;
+  if(!confirm("Import erstatter de nuværende kaffekoder. Fortsæt?"))return;
+  await dbClear();for(const r of p.coffees)await dbPut({...r,id:String(r.id||crypto.randomUUID?.()||Date.now()+Math.random())});
+  await renderSaved();alert("Kaffedata importeret.");
+ }catch(_){alert("Filen kunne ikke importeres som Kaffekode-backup.")}
+};
+document.getElementById("deleteAllBtn").onclick=async()=>{
+ const r=await dbAll();if(!r.length){alert("Der er ingen kaffekoder at slette.");return}
+ if(confirm("Slet ALLE kaffekoder? Det kan kun fortrydes med en backup.")){await dbClear();await renderSaved();alert("Alle kaffekoder er slettet.")}
+};
+
+// Robust grid scanner: four large corner markers define the square.
+// The scanner rectifies the photographed quadrilateral and then samples a 4x4 grid.
+function loadImage(file){
+ return new Promise((res,rej)=>{
+  if(!file){rej(new Error("Ingen billedfil valgt"));return}
+  const reader=new FileReader();
+  reader.onerror=()=>rej(new Error("Kunne ikke læse billedfilen"));
+  reader.onload=()=>{
+   const im=new Image();
+   im.onload=()=>{
+    try{
+     const max=1200,s=Math.min(1,max/Math.max(im.naturalWidth,im.naturalHeight));
+     const c=document.createElement("canvas");
+     c.width=Math.max(1,Math.round(im.naturalWidth*s));
+     c.height=Math.max(1,Math.round(im.naturalHeight*s));
+     const ctx=c.getContext("2d",{willReadFrequently:true});
+     if(!ctx)throw new Error("Canvas kunne ikke oprettes");
+     ctx.drawImage(im,0,0,c.width,c.height);
+     res(c);
+    }catch(err){rej(err)}
+   };
+   im.onerror=()=>rej(new Error("Browseren kunne ikke dekode billedet ("+(file.type||"ukendt billedformat")+")"));
+   im.src=reader.result;
+  };
+  reader.readAsDataURL(file);
+ })
+}
+function grayAt(data,w,x,y){const p=(y*w+x)*4;return .299*data[p]+.587*data[p+1]+.114*data[p+2]}
+function homography(src,dst){
+ const A=[],b=[];
+ for(let i=0;i<4;i++){const x=src[i].x,y=src[i].y,u=dst[i].x,v=dst[i].y;
+  A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);
+  A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v);
+ }
+ for(let i=0;i<8;i++){
+  let m=i;for(let r=i+1;r<8;r++)if(Math.abs(A[r][i])>Math.abs(A[m][i]))m=r;
+  [A[i],A[m]]=[A[m],A[i]];[b[i],b[m]]=[b[m],b[i]];
+  if(Math.abs(A[i][i])<1e-9)return null;
+  const q=A[i][i];for(let j=i;j<8;j++)A[i][j]/=q;b[i]/=q;
+  for(let r=0;r<8;r++)if(r!==i){const f=A[r][i];if(!f)continue;for(let j=i;j<8;j++)A[r][j]-=f*A[i][j];b[r]-=f*b[i];}
+ }
+ return [...b,1];
+}
+function warpPoint(H,x,y){const q=H[6]*x+H[7]*y+1;return {x:(H[0]*x+H[1]*y+H[2])/q,y:(H[3]*x+H[4]*y+H[5])/q}}
+function orderCorners(a){
+ const cx=a.reduce((s,p)=>s+p.x,0)/4,cy=a.reduce((s,p)=>s+p.y,0)/4;
+ return a.slice().sort((p,q)=>Math.atan2(p.y-cy,p.x-cx)-Math.atan2(q.y-cy,q.x-cx));
+}
+function cornerError(a){
+ // After angular ordering, require a sensible convex quadrilateral.
+ let area=0;for(let i=0;i<4;i++){const p=a[i],q=a[(i+1)%4];area+=p.x*q.y-q.x*p.y}area=Math.abs(area)/2;
+ const ds=[];for(let i=0;i<4;i++){const p=a[i],q=a[(i+1)%4];ds.push(Math.hypot(p.x-q.x,p.y-q.y))}
+ const mean=ds.reduce((x,y)=>x+y,0)/4;return {area,ratio:Math.max(...ds)/Math.max(1,Math.min(...ds)),mean};
+}
+function scanImage(c){
+ const g=c.getContext("2d",{willReadFrequently:true}),w=c.width,h=c.height,data=g.getImageData(0,0,w,h).data;
+ const out=[];
+ // Run each attempt independently. One expensive/unsupported attempt must
+ // never abort the whole scan. This is especially important on browsers with
+ // tighter canvas/memory limits.
+ const errors=[];
+ for(const th of [55,75,95,115,135]){
+   try{const r3=scan3x3Field(data,w,h,th); if(r3) out.push(r3)}catch(err){errors.push("3x3@"+th+":"+(err?.message||err))}
+ }
+ for(const th of [55,85,115,145]){
+   try{const r4=scanAtThreshold(data,w,h,th,"original"); if(r4) out.push(r4)}catch(err){errors.push("original@"+th+":"+(err?.message||err))}
+ }
+ out.sort((a,b)=>b.quality-a.quality);
+ const uniq=[];
+ for(const r of out){const k=r.format+":"+r.bits.join("");if(!uniq.some(x=>x.format+":"+x.bits.join("")==k))uniq.push(r)}
+ return uniq;
+}
+
+function scan3x3Field(data,w,h,th){
+ // Detect the hand-drawn 3×3 frame as one connected dark object. A small
+ // morphological close bridges tiny gaps caused by glare/reflections.
+ const maxDim=700,scale=Math.min(1,maxDim/Math.max(w,h));
+ const sw=Math.max(1,Math.round(w*scale)),sh=Math.max(1,Math.round(h*scale));
+ const mask=new Uint8Array(sw*sh);
+ for(let y=0;y<sh;y++){
+   const sy=Math.min(h-1,Math.round(y/scale));
+   for(let x=0;x<sw;x++){
+     const sx=Math.min(w-1,Math.round(x/scale));
+     mask[y*sw+x]=grayAt(data,w,sx,sy)<th?1:0;
+   }
+ }
+ // 3x3 closing: dilation followed by erosion. This is deliberately small;
+ // it joins broken ink but does not swallow neighbouring objects.
+ const dil=new Uint8Array(sw*sh),closed=new Uint8Array(sw*sh);
+ for(let y=1;y<sh-1;y++)for(let x=1;x<sw-1;x++){
+   let on=0;for(let dy=-1;dy<=1&&!on;dy++)for(let dx=-1;dx<=1;dx++)if(mask[(y+dy)*sw+x+dx]){on=1;break}
+   dil[y*sw+x]=on;
+ }
+ for(let y=1;y<sh-1;y++)for(let x=1;x<sw-1;x++){
+   let on=1;for(let dy=-1;dy<=1&&on;dy++)for(let dx=-1;dx<=1;dx++)if(!dil[(y+dy)*sw+x+dx]){on=0;break}
+   closed[y*sw+x]=on;
+ }
+ const seen=new Uint8Array(sw*sh),q=new Int32Array(sw*sh),candidates=[];
+ for(let y=1;y<sh-1;y++)for(let x=1;x<sw-1;x++){
+   const z=y*sw+x;if(!closed[z]||seen[z])continue;
+   let head=0,tail=0,n=0,minx=x,maxx=x,miny=y,maxy=y,sxSum=0,sySum=0;
+   q[tail++]=z;seen[z]=1;
+   while(head<tail){
+     const id=q[head++],cy=Math.floor(id/sw),cx=id-cy*sw;n++;sxSum+=cx;sySum+=cy;
+     if(cx<minx)minx=cx;if(cx>maxx)maxx=cx;if(cy<miny)miny=cy;if(cy>maxy)maxy=cy;
+     const n1=id-1,n2=id+1,n3=id-sw,n4=id+sw;
+     for(const ni of [n1,n2,n3,n4]){
+       if(ni<0||ni>=sw*sh||seen[ni])continue;
+       const nx=ni%sw;if(Math.abs(nx-cx)>1)continue;
+       if(closed[ni]){seen[ni]=1;q[tail++]=ni}
+     }
+   }
+   const bw=maxx-minx+1,bh=maxy-miny+1,area=bw*bh;
+   if(n>Math.max(150,sw*sh*.008) && bw>sw*.10 && bh>sh*.08 && bw<sw*.9 && bh<sh*.9){
+     candidates.push({n,minx,maxx,miny,maxy,bw,bh,area,cx:sxSum/n,cy:sySum/n});
+   }
+ }
+ if(!candidates.length)return null;
+ // Prefer a compact, roughly square component with lots of ink. The frame
+ // and filled cells should form one large component.
+ candidates.sort((a,b)=>{
+   const sa=(a.n/Math.max(1,a.area))*.7 + Math.min(a.bw/a.bh,a.bh/a.bw)*.2 + Math.min(1,a.area/(sw*sh*.15))*.1;
+   const sb=(b.n/Math.max(1,b.area))*.7 + Math.min(b.bw/b.bh,b.bh/b.bw)*.2 + Math.min(1,b.area/(sw*sh*.15))*.1;
+   return sb-sa;
+ });
+ const best=candidates[0];
+ const x0=best.minx/scale,x1=(best.maxx+1)/scale,y0=best.miny/scale,y1=(best.maxy+1)/scale,W=x1-x0,H=y1-y0;
+ if(W<90||H<70||W/H<.55||W/H>1.8)return null;
+
+ // The drawn grid itself defines the nine cells. To tolerate thick lines,
+ // sample only the central 38% of each cell and use a local threshold.
+ const ratios=[];
+ for(let r=0;r<3;r++)for(let col=0;col<3;col++){
+   const cw=W/3,ch=H/3;
+   const ax=x0+col*cw+cw*.31,bx=x0+(col+1)*cw-cw*.31;
+   const ay=y0+r*ch+ch*.31,by=y0+(r+1)*ch-ch*.31;
+   let sum=0,n=0,dark=0;
+   for(let yy=ay;yy<by;yy+=Math.max(2,ch/18))for(let xx=ax;xx<bx;xx+=Math.max(2,cw/18)){
+     const ix=Math.max(0,Math.min(w-1,Math.round(xx))),iy=Math.max(0,Math.min(h-1,Math.round(yy)));
+     const v=grayAt(data,w,ix,iy);sum+=v;n++;
+   }
+   const mean=sum/Math.max(1,n);
+   // Re-sample with a threshold derived from the local mean. This helps with
+   // the dark curved lower half of a tube.
+   const localTh=Math.max(35,Math.min(180,mean*.72));
+   for(let yy=ay;yy<by;yy+=Math.max(2,ch/18))for(let xx=ax;xx<bx;xx+=Math.max(2,cw/18)){
+     const ix=Math.max(0,Math.min(w-1,Math.round(xx))),iy=Math.max(0,Math.min(h-1,Math.round(yy)));
+     if(grayAt(data,w,ix,iy)<localTh)dark++;
+   }
+   ratios.push(dark/Math.max(1,n));
+ }
+ const sorted=ratios.slice().sort((a,b)=>a-b);
+ const low=(sorted[0]+sorted[1]+sorted[2])/3;
+ const high=(sorted[6]+sorted[7]+sorted[8])/3;
+ if(high-low<.055)return null;
+ // Use the valley between the two groups when possible, otherwise midpoint.
+ let split=(low+high)/2;
+ const bits=ratios.map(v=>v>split?1:0);
+ const blacks=bits.reduce((a,b)=>a+b,0);
+ if(blacks===0||blacks===9)return null;
+ return {format:"3x3",bits,quality:(high-low)*2+Math.min(1,best.n/Math.max(1,best.area))};
+}
+
+function scanAtThreshold(data,w,h,th,format){
+ const mask=new Uint8Array(w*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++)mask[y*w+x]=grayAt(data,w,x,y)<th;
+ const seen=new Uint8Array(w*h),cs=[],elongated=[];const q=new Int32Array(Math.min(w*h,3000000));
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){const z=y*w+x;if(!mask[z]||seen[z])continue;let head=0,tail=0,minx=x,maxx=x,miny=y,maxy=y,n=0,sx=0,sy=0;q[tail++]=z;seen[z]=1;
+  while(head<tail){const id=q[head++],yy=Math.floor(id/w),xx=id-yy*w;n++;sx+=xx;sy+=yy;minx=Math.min(minx,xx);maxx=Math.max(maxx,xx);miny=Math.min(miny,yy);maxy=Math.max(maxy,yy);for(const ni of [id-1,id+1,id-w,id+w]){if(ni<0||ni>=w*h)continue;const nx=ni%w;if(Math.abs(nx-xx)>1)continue;if(mask[ni]&&!seen[ni]){seen[ni]=1;if(tail<q.length)q[tail++]=ni}}}
+  const bw=maxx-minx+1,bh=maxy-miny+1,ratio=Math.max(bw,bh)/Math.max(1,Math.min(bw,bh));
+  if(n>18&&n<w*h*.08){const item={x:sx/n,y:sy/n,n,w:bw,h:bh,ratio,minx,maxx,miny,maxy};if(ratio<1.9)cs.push(item);if(ratio>2.2&&Math.max(bw,bh)>Math.min(w,h)*.015)elongated.push(item)}
+ }
+ if(cs.length<4)return null;
+ const cand=cs.slice().sort((a,b)=>b.n-a.n).slice(0,36);let best=null,bestScore=Infinity;
+ for(let a=0;a<cand.length;a++)for(let b=a+1;b<cand.length;b++)for(let d=b+1;d<cand.length;d++)for(let e=d+1;e<cand.length;e++){
+  const ar=orderCorners([cand[a],cand[b],cand[d],cand[e]]),ce=cornerError(ar);if(ce.area<Math.max(500,w*h*.002)||ce.ratio>2.8)continue;const sizes=ar.map(p=>p.n),spread=Math.max(...sizes)/Math.max(1,Math.min(...sizes));if(spread>4||ce.mean<Math.min(w,h)*.08)continue;const score=ce.ratio+(spread-1)*.9-Math.log10(Math.max(10,Math.min(...sizes)))*.45;if(score<bestScore){bestScore=score;best=ar}}
+ if(!best)return null;
+ const cyc=orderCorners(best);let tlIndex=-1,markerScore=-Infinity;
+ for(let i=0;i<4;i++){const tl=cyc[i],tr=cyc[(i+1)%4],vx=tr.x-tl.x,vy=tr.y-tl.y,L=Math.hypot(vx,vy)||1,nx=vy/L,ny=-vx/L;const ex=tl.x-vx/L*Math.max(12,L*.13)+nx*Math.max(12,L*.13),ey=tl.y-vy/L*Math.max(12,L*.13)+ny*Math.max(12,L*.13);for(const m of elongated){const dist=Math.hypot(m.x-ex,m.y-ey),orient=Math.max(m.w,m.h)/Math.max(1,Math.min(m.w,m.h));if(orient<2.2)continue;const along=((m.x-tl.x)*vx+(m.y-tl.y)*vy)/(L*L),side=((m.x-tl.x)*nx+(m.y-tl.y)*ny)/L;if(dist<L*.4&&along>-.35&&along<.22&&side>.01){const sc=side*2-dist/L;if(sc>markerScore){markerScore=sc;tlIndex=i}}}}
+ if(tlIndex<0){const tl=cyc.reduce((a,p)=>p.x+p.y<a.x+a.y?p:a,cyc[0]);tlIndex=cyc.indexOf(tl)}
+ const tl=cyc[tlIndex],tr=cyc[(tlIndex+1)%4],br=cyc[(tlIndex+2)%4],bl=cyc[(tlIndex+3)%4],src=[tl,tr,br,bl],S=1000,H=homography([{x:100,y:100},{x:S-100,y:100},{x:S-100,y:S-100},{x:100,y:S-100}],src);if(!H)return null;
+ const OW=800,OH=800,oc=document.createElement("canvas");oc.width=OW;oc.height=OH;const od=oc.getContext("2d",{willReadFrequently:true}),oi=od.createImageData(OW,OH),odat=oi.data;
+ for(let yy=0;yy<OH;yy++)for(let xx=0;xx<OW;xx++){const p=warpPoint(H,100+xx*(S-200)/OW,100+yy*(S-200)/OH),ix=Math.round(p.x),iy=Math.round(p.y),q=(yy*OW+xx)*4;if(ix>=0&&ix<w&&iy>=0&&iy<h){const v=grayAt(data,w,ix,iy);odat[q]=odat[q+1]=odat[q+2]=v}else{odat[q]=odat[q+1]=odat[q+2]=255}odat[q+3]=255}
+ od.putImageData(oi,0,0);
+ const n= format==="3x3"?3:4, cells=format==="3x3"?cells3():gridCells(),bitsOut=[];
+ // For 3x3, data occupies the inner 3x3 of a 5x5 anchor square. For original, 12 data positions are the non-corner cells of 4x4.
+ for(const [r,c] of cells){let gx,gy;if(format==="3x3"){gx=c+1.5;gy=r+1.5}else{gx=c+.5;gy=r+.5}const cx=100+gx*(OW-200)/(format==="3x3"?5:4),cy=100+gy*(OH-200)/(format==="3x3"?5:4);const rad=(OW-200)/(format==="3x3"?5:4)*.31;let dark=0,total=0;for(let yy=-rad;yy<=rad;yy+=4)for(let xx=-rad;xx<=rad;xx+=4){const ix=Math.round(cx+xx),iy=Math.round(cy+yy);if(ix>=0&&ix<OW&&iy>=0&&iy<OH){total++;if(odat[(iy*OW+ix)*4]<th)dark++}}bitsOut.push(dark/Math.max(1,total)>.22?1:0)}
+ let anchorDark=0;for(const p of [{x:100,y:100},{x:700,y:100},{x:700,y:700},{x:100,y:700}]){let d=0,t=0,rad=48;for(let yy=-rad;yy<=rad;yy+=4)for(let xx=-rad;xx<=rad;xx+=4){const ix=Math.round(p.x+xx),iy=Math.round(p.y+yy);if(ix>=0&&ix<OW&&iy>=0&&iy<OH){t++;if(odat[(iy*OW+ix)*4]<th)d++}}anchorDark+=d/Math.max(1,t)}
+ if(anchorDark/4<.35)return null;
+ return {format,bits:bitsOut,quality:anchorDark/4+(markerScore>0?.3:0)};
+}
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+
+
+function hamming(a,b){let n=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])n++;return n}
+async function findCoffeeForScans(scans){
+ const all=await dbAll();
+ for(const scan of scans){
+  const exact=all.filter(r=>(r.format||"original")===scan.format && (r.code||"").replace(/^3x3:|^4x4:/,"")===scan.bits.join(""));
+  if(exact.length)return {record:exact[0],distance:0,guessed:false,format:scan.format};
+ }
+ const candidates=[];
+ for(const scan of scans){const code=scan.bits.join("");for(const r of all){const rf=r.format||"original";if(rf!==scan.format)continue;const rc=(r.code||"").replace(/^3x3:|^4x4:/,"");if(rc.length!==code.length)continue;const distance=hamming(rc,code);candidates.push({record:r,distance,scan})}}
+ candidates.sort((a,b)=>a.distance-b.distance||b.scan.quality-a.scan.quality);if(!candidates.length)return null;const best=candidates[0],second=candidates[1];if(best.distance<=3&&(!second||second.distance>best.distance))return {...best,guessed:true,format:best.scan.format};return null;
+}
+
+document.getElementById("photo").addEventListener("change",async e=>{
+ const file=e.target.files&&e.target.files[0],out=document.getElementById("scanResult");if(!file)return;out.textContent="Scanner…";await new Promise(r=>setTimeout(r,30));
+ try{const imageCanvas=await loadImage(file),scans=scanImage(imageCanvas);if(!scans.length){out.textContent="Kunne ikke finde en gyldig Kaffekode. Prøv et tættere foto med hele rammen og retningsmarkøren synlige.";return}
+  const found=await findCoffeeForScans(scans);if(!found){const s=scans[0];out.textContent="Koden blev aflæst, men der findes ingen gemt kaffe med den aflæste kode.";return}
+  const r=found.record;out.innerHTML="";const title=document.createElement("b");title.textContent="Fundet: "+(r.name||"Uden navn");const code=document.createElement("div");code.className="small";code.textContent="Kodetype: "+(found.format==="3x3"?"3×3":"Original 4×4")+(found.guessed?" · matchet med tolerance ("+found.distance+" afvigelser)":"");const desc=document.createElement("div");desc.textContent=r.description||"Ingen beskrivelse.";desc.style.marginTop="8px";out.append(title,code,desc);if(r.link){let link=r.link.trim();if(!/^https?:\/\//i.test(link))link="https://"+link;const label=document.createElement("div");label.className="small";label.style.marginTop="10px";label.textContent="Link:";const a=document.createElement("a");a.href=link;a.target="_blank";a.rel="noopener";a.textContent="Åbn kaffe";out.append(label,a)}
+ }catch(err){
+  console.error("Kaffekode scanner error:",err);
+  out.textContent="Scannerfejl: "+(err?.message||String(err))+". Prøv igen.";
+ }
+});
+
+draw();updateStatus();renderSaved();
+</script>
+</body>
+</html>
